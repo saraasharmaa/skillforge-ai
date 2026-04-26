@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── FONTS injected into <head> (NOT inside template literal — bug fix #1) ───
+// ─── FONTS ────────────────────────────────────────────────────────────────────
 const FontLink = () => {
   useEffect(() => {
     const link = document.createElement("link");
@@ -13,7 +13,7 @@ const FontLink = () => {
   return null;
 };
 
-// ─── ALL CSS in a plain string — no @import conflicts (bug fix #6) ────────────
+// ─── STYLES ───────────────────────────────────────────────────────────────────
 const STYLES = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -46,6 +46,7 @@ const STYLES = `
   .sf-pi:hover{background:var(--sf2);color:var(--tx)}
   .sf-pi.act{border-left-color:var(--ac);color:var(--ac);background:rgba(232,255,71,.04)}
   .sf-pi.dn{color:var(--gr)}
+  .sf-pi.disabled-nav{opacity:.35;cursor:not-allowed;pointer-events:none}
   .sf-pdot{width:20px;height:20px;border-radius:50%;background:var(--sf2);border:1px solid var(--b2);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;transition:background .12s}
   .sf-pi.act .sf-pdot{background:var(--ac);color:#000;border-color:var(--ac)}
   .sf-pi.dn .sf-pdot{background:var(--gr);color:#000;border-color:var(--gr)}
@@ -146,10 +147,11 @@ const STYLES = `
   .sf-hc.green .sf-hl{color:var(--gr)}
   .sf-hn{font-size:10px;color:var(--mu);line-height:1.4}
 
-  /* TRUTH */
+  /* TRUTH / COACH NOTE */
   .sf-truth{border-top:2px solid var(--ac2);background:var(--sf);border-radius:0 0 var(--r) var(--r);padding:1.25rem 1.5rem;margin-bottom:1.5rem}
   .sf-tt{font-size:9px;color:var(--ac2);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px}
-  .sf-tx{font-family:var(--fs);font-style:italic;font-size:15px;line-height:1.75;color:var(--tx)}
+  /* FIX: renamed from .sf-tx to .sf-tq to avoid collision with --tx CSS variable name */
+  .sf-tq{font-family:var(--fs);font-style:italic;font-size:15px;line-height:1.75;color:var(--tx)}
 
   /* ARCHETYPE */
   .sf-arch{display:flex;align-items:flex-start;gap:1rem;background:var(--sf);border:1px solid var(--b);border-radius:var(--r);padding:1.1rem 1.25rem;margin-bottom:1.5rem}
@@ -219,6 +221,7 @@ const STYLES = `
 
   /* ERROR / HINT */
   .sf-err{background:rgba(255,69,69,.07);border:1px solid rgba(255,69,69,.2);border-radius:var(--r);padding:10px 14px;font-size:11px;color:var(--re);margin-bottom:1rem;line-height:1.6}
+  .sf-warn{background:rgba(255,170,0,.07);border:1px solid rgba(255,170,0,.2);border-radius:var(--r);padding:10px 14px;font-size:11px;color:var(--am);margin-bottom:1rem;line-height:1.6}
   .sf-hint{font-size:10px;color:var(--mu);margin-top:8px;line-height:1.6;font-style:italic}
   .sf-hr{border:none;border-top:1px solid var(--b);margin:1.75rem 0}
 `;
@@ -233,42 +236,73 @@ const PHASES = [
   { n: 6, label: "Accountability coach" },
 ];
 
-// ─── PROMPTS ──────────────────────────────────────────────────────────────────
-const SYS_CHAT = `You are SkillForge AI — an elite career readiness assessment agent.
-The candidate is applying for a Data Analyst role at Xapads Media (ad-tech company).
-Rules:
-- ONE focused question per message (max 2)
+// ─── SYSTEM PROMPTS ───────────────────────────────────────────────────────────
+
+// FIX #1: SYS_CHAT is now a function that injects the actual JD + resume
+// so the AI always has full context on every message — not just the first call.
+function buildSysChat(jd, resume) {
+  return `You are SkillForge AI — an elite career readiness assessment agent.
+
+The candidate submitted the following:
+
+JOB DESCRIPTION:
+${jd}
+
+CANDIDATE RESUME:
+${resume}
+
+Your rules for this phase:
+- Ask ONE focused question per message (max 2 in exceptional cases)
 - Direct, professional, conversational — never robotic
-- Adapt difficulty based on answers
-- Cover: career goals, timeline, self-ratings 1–5 for Excel/SQL/Python/Statistics/Visualization/Business Analytics, skill probing (conceptual → applied → edge-case), portfolio depth, interview readiness, daily hours, self-diagnosed gaps
-- After 8–10 exchanges write exactly: "I have enough data to generate your assessment. Type generate assessment to proceed."
-- Under 100 words per reply. No bullet lists in questions.`;
+- Adapt difficulty based on the candidate's answers
+- Cover these topics across 8–10 exchanges:
+    • Career goals and target timeline
+    • Self-ratings 1–5 for each major skill required by the JD
+    • Skill probing: conceptual → applied → edge-case → real-world system
+    • Portfolio depth (original vs tutorial, deployed work, architecture choices, tradeoffs)
+    • Interview readiness: DSA, SQL, system design, behavioral stories
+    • Daily hours available, learning constraints, style, accountability preference
+    • Self-diagnosed gaps and improvement areas
+- After 8–10 substantive exchanges, write EXACTLY: "I have enough data to generate your assessment. Type generate assessment to proceed."
+- Keep each reply under 100 words. No bullet lists in questions. Sound like a senior hiring manager.`;
+}
 
 const SYS_ASSESS = `You are SkillForge AI. Return ONE valid JSON object only.
-No markdown fences, no text before or after the JSON.
+No markdown fences, no preamble, no trailing text. Just the raw JSON.
 
-Required schema:
+Required schema (all fields mandatory):
 {
-  "readinessScore":integer,
-  "archetype":string,
-  "archetypeDesc":string,
-  "verdictTitle":string,
-  "verdictBody":string,
-  "hiringManagerView":string,
-  "truthBomb":string,
-  "skills":[{"name":string,"claimed":integer,"demonstrated":integer,"required":integer,"priority":"critical"|"important"|"nice"}],
-  "heatmap":[{"label":string,"status":"red"|"amber"|"green","note":string}],
-  "risks":[{"label":string,"detail":string,"severity":"high"|"med"}],
-  "strengths":[string],
-  "plan30":[string],
-  "plan60":[string],
-  "plan90":[string],
-  "resources":[{"skill":string,"name":string,"desc":string,"type":"free"|"premium"|"platform"}],
-  "weeklyPlan":[{"day":string,"focus":string,"hours":string}],
-  "readinessBreakdown":{"technical":integer,"interview":integer,"portfolio":integer,"resume":integer,"domain":integer}
-}`;
+  "readinessScore": integer (0-100),
+  "archetype": string,
+  "archetypeDesc": string,
+  "verdictTitle": string,
+  "verdictBody": string,
+  "hiringManagerView": string,
+  "truthBomb": string,
+  "skills": [{"name": string, "claimed": integer, "demonstrated": integer, "required": integer, "priority": "critical"|"important"|"nice"}],
+  "heatmap": [{"label": string, "status": "red"|"amber"|"green", "note": string}],
+  "risks": [{"label": string, "detail": string, "severity": "high"|"med"}],
+  "strengths": [string],
+  "plan30": [string],
+  "plan60": [string],
+  "plan90": [string],
+  "resources": [{"skill": string, "name": string, "desc": string, "type": "free"|"premium"|"platform"}],
+  "weeklyPlan": [{"day": string, "focus": string, "hours": string}],
+  "readinessBreakdown": {"technical": integer, "interview": integer, "portfolio": integer, "resume": integer, "domain": integer}
+}
 
-// ─── API (bug fix #2 — correct headers for browser calls) ────────────────────
+Rules:
+- skills array must have 5-8 entries derived from the JD and interview
+- heatmap must have 6-9 entries covering all major skill areas
+- risks must have 3-5 entries
+- strengths must have 3-5 entries  
+- plan30/plan60/plan90 must each have 4-6 bullet items
+- resources must have 4-8 entries
+- weeklyPlan must have EXACTLY 7 entries (Mon through Sun)
+- readinessBreakdown values must be integers 0-100
+- Be candid: do not sugarcoat. Surface real gaps from the interview.`;
+
+// ─── API CALL ─────────────────────────────────────────────────────────────────
 async function api(messages, system) {
   const headers = {
     "Content-Type": "application/json",
@@ -278,27 +312,55 @@ async function api(messages, system) {
   const key = import.meta.env.VITE_ANTHROPIC_API_KEY;
   if (key) headers["x-api-key"] = key;
 
+  // FIX #2: Validate alternating roles — Anthropic API requires user/assistant alternation.
+  // Deduplicate consecutive same-role messages by merging them.
+  const cleaned = [];
+  for (const msg of messages) {
+    if (cleaned.length > 0 && cleaned[cleaned.length - 1].role === msg.role) {
+      cleaned[cleaned.length - 1] = {
+        role: msg.role,
+        content: cleaned[cleaned.length - 1].content + "\n\n" + msg.content,
+      };
+    } else {
+      cleaned.push({ role: msg.role, content: msg.content });
+    }
+  }
+  // API requires first message to be user role
+  if (cleaned.length === 0 || cleaned[0].role !== "user") {
+    throw new Error("First message must be from user role.");
+  }
+
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1024, system, messages }),
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2048,
+      system,
+      messages: cleaned,
+    }),
   });
 
   if (!res.ok) {
     let msg = `API error ${res.status}`;
-    try { const d = await res.json(); msg = d?.error?.message || msg; } catch (_) {}
+    try {
+      const d = await res.json();
+      msg = d?.error?.message || msg;
+    } catch (_) {}
     throw new Error(msg);
   }
   const d = await res.json();
   return (d.content || []).map(b => b.text || "").join("");
 }
 
-// ─── JSON parse — robust extractor (bug fix #3) ───────────────────────────────
+// ─── JSON EXTRACTOR ───────────────────────────────────────────────────────────
 function extractJSON(raw) {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
+  // Strip markdown fences if present
+  const stripped = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error("No JSON object found in response");
-  return JSON.parse(raw.slice(start, end + 1));
+  return JSON.parse(stripped.slice(start, end + 1));
 }
 
 // ─── SCORE RING ───────────────────────────────────────────────────────────────
@@ -331,7 +393,9 @@ function Bar({ name, claimed, demonstrated, required, priority }) {
           <span style={{ fontSize: 9, color: "var(--mu)" }}>{demonstrated}/5</span>
         </div>
       </div>
-      <div className="sf-bw"><div className="sf-bar" style={{ width: `${(demonstrated / 5) * 100}%`, background: col }} /></div>
+      <div className="sf-bw">
+        <div className="sf-bar" style={{ width: `${(demonstrated / 5) * 100}%`, background: col }} />
+      </div>
       <div className="sf-bls"><span>claimed {claimed}/5</span><span>required {required}/5</span></div>
     </div>
   );
@@ -360,7 +424,11 @@ function Thinking({ label = "Thinking…" }) {
         <div className="sf-mn">SkillForge AI</div>
         <div className="sf-mb">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="sf-dots"><div className="sf-dot" /><div className="sf-dot" /><div className="sf-dot" /></div>
+            <div className="sf-dots">
+              <div className="sf-dot" />
+              <div className="sf-dot" />
+              <div className="sf-dot" />
+            </div>
             <span style={{ fontSize: 10, color: "var(--mu)" }}>{label}</span>
           </div>
         </div>
@@ -387,6 +455,9 @@ export default function App() {
   const [done, setDone] = useState(new Set());
   const [jd, setJd] = useState("");
   const [resume, setResume] = useState("");
+
+  // FIX #3: msgs stores ONLY the visible conversation (assistant + user turns).
+  // The JD/resume context is injected via the system prompt on every call, not stored in msgs.
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
@@ -397,73 +468,151 @@ export default function App() {
   const [tracker, setTracker] = useState(Array(35).fill(false));
   const endRef = useRef(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, thinking, generating]);
+  // Store jd/resume in refs so callbacks can always access the latest value
+  const jdRef = useRef(jd);
+  const resumeRef = useRef(resume);
+  useEffect(() => { jdRef.current = jd; }, [jd]);
+  useEffect(() => { resumeRef.current = resume; }, [resume]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, thinking, generating]);
 
   const finish = n => setDone(prev => new Set([...prev, n]));
 
-  // bug fix #4 — allow nav to any completed or adjacent phase
+  // FIX #4: Proper navigation guard — can only go to phases you've unlocked.
+  // Phase 3+ require the assessment data to exist.
   const go = n => {
     if (n === phase) return;
-    if (n === 1 || done.has(n) || done.has(n - 1)) setPhase(n);
+    if (n === 1) { setPhase(1); return; }
+    if (n === 2 && done.has(1)) { setPhase(2); return; }
+    // Phases 3–6 require assessment data
+    if (n >= 3 && data) { setPhase(n); return; }
   };
 
+  const isNavAllowed = n => {
+    if (n === 1) return true;
+    if (n === 2) return done.has(1);
+    return !!data; // phases 3–6 need assessment data
+  };
+
+  // ─── PHASE 1 → 2: Submit JD + Resume, get first question ──────────────────
   const start = async () => {
     if (!jd.trim() || !resume.trim()) return;
-    setChatErr(""); setThinking(true); finish(1); setPhase(2);
+    setChatErr("");
+    setThinking(true);
+    finish(1);
+    setPhase(2);
+
     try {
+      // FIX #5: The first user message contains a clear instruction to start.
+      // JD + resume are in the system prompt via buildSysChat(), not the user message.
+      const firstUserMsg = "I'm ready to begin my assessment. Please start with your first question.";
       const r = await api(
-        [{ role: "user", content: `Job Description:\n${jd}\n\nResume:\n${resume}\n\nBegin the adaptive assessment with your first discovery question.` }],
-        SYS_CHAT
+        [{ role: "user", content: firstUserMsg }],
+        buildSysChat(jd, resume)
       );
-      setMsgs([{ role: "assistant", content: r }]);
-    } catch (e) { setChatErr(e.message); }
-    finally { setThinking(false); }
+      setMsgs([{ role: "user", content: firstUserMsg }, { role: "assistant", content: r }]);
+    } catch (e) {
+      setChatErr(e.message);
+    } finally {
+      setThinking(false);
+    }
   };
 
-  // bug fix #5 — useCallback deps include msgs
+  // ─── PHASE 2: Send a chat message ─────────────────────────────────────────
+  // FIX #6: useCallback correctly rebuilds the system prompt from refs each call,
+  // so the AI always has JD/resume context throughout the entire conversation.
   const send = useCallback(async () => {
     const txt = input.trim();
     if (!txt || thinking || generating) return;
-    setInput(""); setChatErr("");
+    setInput("");
+    setChatErr("");
+
     const next = [...msgs, { role: "user", content: txt }];
     setMsgs(next);
 
+    // FIX #7: Detect "generate assessment" trigger
     if (/generate\s+assessment/i.test(txt)) {
-      setGenerating(true); setAssessErr("");
+      setGenerating(true);
+      setAssessErr("");
       try {
-        const raw = await api(
-          [{ role: "user", content: `Conversation:\n${next.map(m => `${m.role}: ${m.content}`).join("\n")}\n\nGenerate the JSON assessment now.` }],
-          SYS_ASSESS
-        );
+        // Build a summary prompt that includes conversation context
+        const conversationText = next
+          .map(m => `${m.role === "assistant" ? "SkillForge AI" : "Candidate"}: ${m.content}`)
+          .join("\n\n");
+
+        const assessPayload = [
+          {
+            role: "user",
+            content: `Here is the full assessment conversation:\n\n${conversationText}\n\nJob Description context:\n${jdRef.current}\n\nNow generate the JSON assessment based on everything above.`,
+          },
+        ];
+
+        const raw = await api(assessPayload, SYS_ASSESS);
         const result = extractJSON(raw);
-        setData(result); finish(2); finish(3); setPhase(3);
+
+        // Validate weeklyPlan has 7 entries — pad if AI returned fewer
+        if (!Array.isArray(result.weeklyPlan) || result.weeklyPlan.length < 7) {
+          const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+          result.weeklyPlan = days.map((day, i) =>
+            result.weeklyPlan?.[i] ?? { day, focus: "Review and consolidate", hours: "1–2h" }
+          );
+        }
+
+        setData(result);
+        // FIX #8: Only mark phase 2 done here. Phase 3 is marked when user clicks through.
+        finish(2);
+        setPhase(3);
       } catch (e) {
-        setAssessErr(`Parse failed (${e.message}). Type "generate assessment" to retry.`);
-      } finally { setGenerating(false); }
+        setAssessErr(`Assessment generation failed: ${e.message}. Type "generate assessment" to retry.`);
+      } finally {
+        setGenerating(false);
+      }
       return;
     }
 
+    // Normal conversational message — always pass full history + dynamic system prompt
     setThinking(true);
     try {
-      const r = await api(next.map(m => ({ role: m.role, content: m.content })), SYS_CHAT);
+      // FIX #9: Pass the full conversation history (proper alternating roles)
+      // and rebuild the system prompt with JD/resume every time.
+      const apiMsgs = next.map(m => ({ role: m.role, content: m.content }));
+      const r = await api(apiMsgs, buildSysChat(jdRef.current, resumeRef.current));
       setMsgs(p => [...p, { role: "assistant", content: r }]);
-    } catch (e) { setChatErr(e.message); }
-    finally { setThinking(false); }
-  }, [input, msgs, thinking, generating]); // bug fix #5 — all deps listed
+    } catch (e) {
+      setChatErr(e.message);
+    } finally {
+      setThinking(false);
+    }
+  }, [input, msgs, thinking, generating]);
 
-  const onKey = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+  const onKey = e => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
 
-  // bug fix #8 — reset clears ALL state including errors
+  // ─── RESET ────────────────────────────────────────────────────────────────
   const reset = () => {
-    setPhase(1); setDone(new Set());
-    setJd(""); setResume(""); setMsgs([]);
-    setInput(""); setData(null);
-    setChatErr(""); setAssessErr("");
+    setPhase(1);
+    setDone(new Set());
+    setJd("");
+    setResume("");
+    setMsgs([]);
+    setInput("");
+    setData(null);
+    setChatErr("");
+    setAssessErr("");
     setTracker(Array(35).fill(false));
   };
 
   const score = data?.readinessScore ?? 0;
   const days = tracker.filter(Boolean).length;
+
+  // FIX #10: Detect missing API key and warn user early
+  const hasKey = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
 
   return (
     <>
@@ -491,9 +640,11 @@ export default function App() {
         <aside className="sf-side sf-sb">
           <div className="sf-side-lbl">Assessment</div>
           {PHASES.map(p => (
-            <div key={p.n}
-              className={`sf-pi ${phase === p.n ? "act" : ""} ${done.has(p.n) ? "dn" : ""}`}
-              onClick={() => go(p.n)}>
+            <div
+              key={p.n}
+              className={`sf-pi ${phase === p.n ? "act" : ""} ${done.has(p.n) ? "dn" : ""} ${!isNavAllowed(p.n) ? "disabled-nav" : ""}`}
+              onClick={() => go(p.n)}
+            >
               <div className="sf-pdot">{done.has(p.n) ? "✓" : p.n}</div>
               <span>{p.label}</span>
             </div>
@@ -508,24 +659,54 @@ export default function App() {
               <div className="sf-hero">
                 <div className="sf-htag"><div className="sf-hdot" />Career readiness diagnostic · Active</div>
                 <h1 className="sf-h1">Diagnose your<br /><em className="sf-em">true</em> readiness.</h1>
-                <p className="sf-hsub">Paste your job description and resume. SkillForge runs a 6-phase diagnostic — adaptive AI interview, gap analysis, proficiency scoring, and a 90-day learning plan.</p>
+                <p className="sf-hsub">
+                  Paste your job description and resume. SkillForge runs a 6-phase diagnostic — adaptive AI interview,
+                  gap analysis, proficiency scoring, and a 90-day learning plan.
+                </p>
                 <div className="sf-hstats">
                   <div><div className="sf-snum">6</div><div className="sf-slbl">Phases</div></div>
                   <div><div className="sf-snum">AI</div><div className="sf-slbl">Powered interview</div></div>
                   <div><div className="sf-snum">90</div><div className="sf-slbl">Day plan</div></div>
                 </div>
               </div>
+
+              {/* FIX #10: Missing API key warning */}
+              {!hasKey && (
+                <div className="sf-warn">
+                  ⚠ No API key detected. Set <code>VITE_ANTHROPIC_API_KEY</code> in your <code>.env</code> file, then restart the dev server.
+                </div>
+              )}
+
               <div className="sf-ig">
                 <label className="sf-lbl" htmlFor="sf-jd">Job description</label>
-                {/* bug fix #9 — scoped class, not bare textarea selector */}
-                <textarea id="sf-jd" className="sf-ta" value={jd} onChange={e => setJd(e.target.value)} placeholder="Paste the full job description here…" rows={5} />
+                <textarea
+                  id="sf-jd"
+                  className="sf-ta"
+                  value={jd}
+                  onChange={e => setJd(e.target.value)}
+                  placeholder="Paste the full job description here…"
+                  rows={5}
+                />
               </div>
               <div className="sf-ig">
                 <label className="sf-lbl" htmlFor="sf-rs">Your resume</label>
-                <textarea id="sf-rs" className="sf-ta" value={resume} onChange={e => setResume(e.target.value)} placeholder="Paste your resume as plain text…" rows={7} />
+                <textarea
+                  id="sf-rs"
+                  className="sf-ta"
+                  value={resume}
+                  onChange={e => setResume(e.target.value)}
+                  placeholder="Paste your resume as plain text…"
+                  rows={7}
+                />
               </div>
               {chatErr && <div className="sf-err">⚠ {chatErr}</div>}
-              <button className="sf-btn" onClick={start} disabled={!jd.trim() || !resume.trim()}>Begin diagnostic →</button>
+              <button
+                className="sf-btn"
+                onClick={start}
+                disabled={!jd.trim() || !resume.trim() || !hasKey}
+              >
+                Begin diagnostic →
+              </button>
               <p className="sf-hint">Both fields required. The AI interview starts immediately after submission.</p>
             </>
           )}
@@ -536,23 +717,38 @@ export default function App() {
               <div style={{ marginBottom: "1.5rem" }}>
                 <div className="sf-stag">Phase 2 — Adaptive assessment</div>
                 <div className="sf-stit">Live skill interview</div>
-                <div className="sf-ssub">Answer honestly. Questions adapt to your responses. When prompted, type <span style={{ color: "var(--ac)" }}>generate assessment</span> to proceed.</div>
+                <div className="sf-ssub">
+                  Answer honestly. Questions adapt to your responses. When prompted, type{" "}
+                  <span style={{ color: "var(--ac)" }}>generate assessment</span> to proceed.
+                </div>
               </div>
               <div className="sf-chat">
-                {msgs.map((m, i) => <Bubble key={i} role={m.role} content={m.content} />)}
+                {/* FIX #11: Only render assistant and visible user messages (skip the hidden first user msg) */}
+                {msgs.slice(1).map((m, i) => <Bubble key={i} role={m.role} content={m.content} />)}
                 {thinking && <Thinking label="Thinking…" />}
-                {generating && <Thinking label="Generating your full assessment — ~20 seconds…" />}
+                {generating && <Thinking label="Generating your full assessment — this may take ~20 seconds…" />}
                 <div ref={endRef} />
               </div>
               {chatErr && <div className="sf-err">⚠ {chatErr} — please try again.</div>}
               {assessErr && <div className="sf-err">⚠ {assessErr}</div>}
               <div className="sf-crow">
-                {/* bug fix #7 — name attribute added */}
-                <input className="sf-ci" name="sf-msg" value={input}
-                  onChange={e => setInput(e.target.value)} onKeyDown={onKey}
+                <input
+                  className="sf-ci"
+                  name="sf-msg"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={onKey}
                   placeholder="Type your response… (Enter to send)"
-                  disabled={thinking || generating} autoComplete="off" />
-                <button className="sf-btn" onClick={send} disabled={thinking || generating || !input.trim()}>Send</button>
+                  disabled={thinking || generating}
+                  autoComplete="off"
+                />
+                <button
+                  className="sf-btn"
+                  onClick={send}
+                  disabled={thinking || generating || !input.trim()}
+                >
+                  Send
+                </button>
               </div>
             </>
           )}
@@ -565,7 +761,14 @@ export default function App() {
                 <div className="sf-stit">True skill profile</div>
                 <div className="sf-ssub">Claimed vs demonstrated vs required. No sugarcoating.</div>
               </div>
-              {!data ? <Gate title="Complete Phase 2 first" sub="Finish the adaptive assessment to unlock proficiency scoring." onBack={() => setPhase(2)} back="Go to assessment" /> : (
+              {!data ? (
+                <Gate
+                  title="Complete Phase 2 first"
+                  sub="Finish the adaptive assessment to unlock proficiency scoring."
+                  onBack={() => setPhase(2)}
+                  back="Go to assessment"
+                />
+              ) : (
                 <>
                   <div className="sf-srow">
                     <Ring score={data.readinessScore} />
@@ -595,12 +798,23 @@ export default function App() {
                     {Object.entries(data.readinessBreakdown || {}).map(([k, v]) => (
                       <div key={k} className="sf-pr">
                         <div className="sf-pla">{k.charAt(0).toUpperCase() + k.slice(1)}</div>
-                        <div className="sf-pb"><div className="sf-pf" style={{ width: `${v}%`, background: v >= 70 ? "var(--gr)" : v >= 45 ? "var(--am)" : "var(--re)" }} /></div>
+                        <div className="sf-pb">
+                          <div
+                            className="sf-pf"
+                            style={{
+                              width: `${v}%`,
+                              background: v >= 70 ? "var(--gr)" : v >= 45 ? "var(--am)" : "var(--re)",
+                            }}
+                          />
+                        </div>
                         <div className="sf-pv">{v}%</div>
                       </div>
                     ))}
                   </div>
-                  <button className="sf-btn" onClick={() => { finish(3); setPhase(4); }}>Proceed to readiness review →</button>
+                  {/* FIX #8: Mark phase 3 done when user clicks through */}
+                  <button className="sf-btn" onClick={() => { finish(3); setPhase(4); }}>
+                    Proceed to readiness review →
+                  </button>
                 </>
               )}
             </>
@@ -614,7 +828,14 @@ export default function App() {
                 <div className="sf-stit">The honest verdict</div>
                 <div className="sf-ssub">Hiring manager perspective. Gap heatmap. Risk forecast.</div>
               </div>
-              {!data ? <Gate title="Complete earlier phases first" sub="Run the assessment to unlock this view." onBack={() => setPhase(2)} back="Go to assessment" /> : (
+              {!data ? (
+                <Gate
+                  title="Complete earlier phases first"
+                  sub="Run the assessment to unlock this view."
+                  onBack={() => setPhase(2)}
+                  back="Go to assessment"
+                />
+              ) : (
                 <>
                   <div className="sf-card sf-ca">
                     <div style={{ fontSize: 9, color: "var(--ac)", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 6 }}>Current verdict</div>
@@ -651,16 +872,21 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                  {/* FIX #12: Renamed .sf-tx to .sf-tq to avoid conflict with --tx CSS variable */}
                   <div className="sf-truth">
                     <div className="sf-tt">Truth bomb</div>
-                    <div className="sf-tx">"{data.truthBomb}"</div>
+                    <div className="sf-tq">"{data.truthBomb}"</div>
                   </div>
                   <div className="sf-stag" style={{ marginBottom: 10 }}>Strength zones</div>
                   {data.strengths?.map((s, i) => (
-                    <div key={i} className="sf-card sf-cg"><div style={{ fontSize: 11, color: "var(--mu)", lineHeight: 1.55 }}>{s}</div></div>
+                    <div key={i} className="sf-card sf-cg">
+                      <div style={{ fontSize: 11, color: "var(--mu)", lineHeight: 1.55 }}>{s}</div>
+                    </div>
                   ))}
                   <div style={{ marginTop: "1.5rem" }}>
-                    <button className="sf-btn" onClick={() => { finish(4); setPhase(5); }}>Build my learning plan →</button>
+                    <button className="sf-btn" onClick={() => { finish(4); setPhase(5); }}>
+                      Build my learning plan →
+                    </button>
                   </div>
                 </>
               )}
@@ -675,7 +901,14 @@ export default function App() {
                 <div className="sf-stit">Your 90-day roadmap</div>
                 <div className="sf-ssub">Realistic. Prescriptive. No fantasy timelines.</div>
               </div>
-              {!data ? <Gate title="Complete earlier phases first" sub="Run the assessment to unlock your learning plan." onBack={() => setPhase(2)} back="Go to assessment" /> : (
+              {!data ? (
+                <Gate
+                  title="Complete earlier phases first"
+                  sub="Run the assessment to unlock your learning plan."
+                  onBack={() => setPhase(2)}
+                  back="Go to assessment"
+                />
+              ) : (
                 <>
                   <div className="sf-pg">
                     {[
@@ -687,15 +920,22 @@ export default function App() {
                         <div className="sf-pn">{pl.lbl}</div>
                         <div className="sf-pt">{pl.tit}</div>
                         {pl.items?.map((item, j) => (
-                          <div key={j} className="sf-pi2"><div className="sf-pd" /><div className="sf-ptx">{item}</div></div>
+                          <div key={j} className="sf-pi2">
+                            <div className="sf-pd" />
+                            <div className="sf-ptx">{item}</div>
+                          </div>
                         ))}
                       </div>
                     ))}
                   </div>
                   <div className="sf-stag" style={{ marginBottom: 10 }}>Weekly execution schedule</div>
                   <div className="sf-sp">
-                    <div className="sf-sprow sf-sph"><div className="sf-spc">Day</div><div className="sf-spc">Focus area</div><div className="sf-spc">Hours</div></div>
-                    {data.weeklyPlan?.map((w, i) => (
+                    <div className="sf-sprow sf-sph">
+                      <div className="sf-spc">Day</div>
+                      <div className="sf-spc">Focus area</div>
+                      <div className="sf-spc">Hours</div>
+                    </div>
+                    {(data.weeklyPlan || []).map((w, i) => (
                       <div key={i} className="sf-sprow">
                         <div className="sf-spc sf-spd">{w.day}</div>
                         <div className="sf-spc" style={{ color: "var(--mu)" }}>{w.focus}</div>
@@ -705,7 +945,7 @@ export default function App() {
                   </div>
                   <div className="sf-stag" style={{ marginBottom: 10 }}>Curated resources</div>
                   <div className="sf-rg">
-                    {data.resources?.map((r, i) => (
+                    {(data.resources || []).map((r, i) => (
                       <div key={i} className="sf-rc">
                         <div className="sf-rsk">{r.skill}</div>
                         <div className="sf-rna">{r.name}</div>
@@ -714,7 +954,9 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <button className="sf-btn" onClick={() => { finish(5); setPhase(6); }}>Activate accountability coach →</button>
+                  <button className="sf-btn" onClick={() => { finish(5); setPhase(6); }}>
+                    Activate accountability coach →
+                  </button>
                 </>
               )}
             </>
@@ -728,26 +970,50 @@ export default function App() {
                 <div className="sf-stit">Weekly execution tracker</div>
                 <div className="sf-ssub">Log daily activity. Keep the streak. Watch your score move.</div>
               </div>
-              {!data ? <Gate title="Complete earlier phases first" sub="Run the full assessment to unlock coaching." onBack={() => setPhase(2)} back="Go to assessment" /> : (
+              {!data ? (
+                <Gate
+                  title="Complete earlier phases first"
+                  sub="Run the full assessment to unlock coaching."
+                  onBack={() => setPhase(2)}
+                  back="Go to assessment"
+                />
+              ) : (
                 <>
                   <div className="sf-sc">
-                    <div className="sf-scc"><div className="sf-scn">{days}</div><div className="sf-scl">Days logged</div></div>
-                    <div className="sf-scc"><div className="sf-scn">{Math.round(days * 2.5)}</div><div className="sf-scl">Est. hours studied</div></div>
-                    <div className="sf-scc"><div className="sf-scn">{Math.min(100, Math.round(score + days * 0.6))}</div><div className="sf-scl">Projected score</div></div>
+                    <div className="sf-scc">
+                      <div className="sf-scn">{days}</div>
+                      <div className="sf-scl">Days logged</div>
+                    </div>
+                    <div className="sf-scc">
+                      <div className="sf-scn">{Math.round(days * 2.5)}</div>
+                      <div className="sf-scl">Est. hours studied</div>
+                    </div>
+                    <div className="sf-scc">
+                      <div className="sf-scn">{Math.min(100, Math.round(score + days * 0.6))}</div>
+                      <div className="sf-scl">Projected score</div>
+                    </div>
                   </div>
                   <div className="sf-stag" style={{ marginBottom: 8 }}>35-day streak — click to mark complete</div>
                   <div className="sf-tr">
                     {tracker.map((on, i) => (
-                      <div key={i} className={`sf-tc ${on ? "on" : ""}`}
-                        onClick={() => setTracker(t => { const n = [...t]; n[i] = !n[i]; return n; })}>
+                      <div
+                        key={i}
+                        className={`sf-tc ${on ? "on" : ""}`}
+                        onClick={() => setTracker(t => { const n = [...t]; n[i] = !n[i]; return n; })}
+                      >
                         {i + 1}
                       </div>
                     ))}
                   </div>
                   <div className="sf-stag" style={{ marginBottom: 10 }}>Next 7-day sprint</div>
                   <div className="sf-sp">
-                    <div className="sf-sprow sf-sph"><div className="sf-spc">Day</div><div className="sf-spc">Focus area</div><div className="sf-spc">Hours</div></div>
-                    {data.weeklyPlan?.slice(0, 7).map((w, i) => (
+                    <div className="sf-sprow sf-sph">
+                      <div className="sf-spc">Day</div>
+                      <div className="sf-spc">Focus area</div>
+                      <div className="sf-spc">Hours</div>
+                    </div>
+                    {/* FIX #13: Safe slice — weeklyPlan guaranteed 7 items by assessment normalizer */}
+                    {(data.weeklyPlan || []).slice(0, 7).map((w, i) => (
                       <div key={i} className="sf-sprow">
                         <div className="sf-spc sf-spd">{w.day}</div>
                         <div className="sf-spc" style={{ color: "var(--mu)" }}>{w.focus}</div>
@@ -757,7 +1023,10 @@ export default function App() {
                   </div>
                   <div className="sf-truth">
                     <div className="sf-tt">Coach note</div>
-                    <div className="sf-tx">"The candidates who land offers aren't always the most talented — they're the most consistent. Show up every day. The score moves."</div>
+                    <div className="sf-tq">
+                      "The candidates who land offers aren't always the most talented — they're the most consistent.
+                      Show up every day. The score moves."
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button className="sf-btn" onClick={reset}>Start new assessment →</button>
