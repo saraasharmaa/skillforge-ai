@@ -3,13 +3,11 @@ export default async function handler(req, res) {
 
   const { system, messages, max_tokens } = req.body;
 
-  // Convert Anthropic-style messages to Gemini format
   const geminiContents = messages.map(m => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.content }],
   }));
 
-  // Prepend system prompt as a user/model pair if present
   if (system) {
     geminiContents.unshift(
       { role: "user", parts: [{ text: `System instructions:\n${system}` }] },
@@ -38,7 +36,6 @@ export default async function handler(req, res) {
     return res.status(response.status).json({ error: data });
   }
 
-  // Convert Gemini response back to Anthropic-style format so App.jsx works unchanged
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   res.status(200).json({
     content: [{ type: "text", text }],
