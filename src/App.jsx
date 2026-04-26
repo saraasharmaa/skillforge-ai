@@ -330,7 +330,7 @@ async function api(messages, system) {
     throw new Error("First message must be from user role.");
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/anthropic", {
     method: "POST",
     headers,
     body: JSON.stringify({
