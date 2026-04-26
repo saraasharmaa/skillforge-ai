@@ -304,13 +304,7 @@ Rules:
 
 // ─── API CALL ─────────────────────────────────────────────────────────────────
 async function api(messages, system) {
-  const headers = {
-    "Content-Type": "application/json",
-    "anthropic-version": "2023-06-01",
-    "anthropic-dangerous-direct-browser-calls": "true",
-  };
-  const key = import.meta.env.VITE_ANTHROPIC_API_KEY;
-  if (key) headers["x-api-key"] = key;
+  const headers = { "Content-Type": "application/json" };
 
   // FIX #2: Validate alternating roles — Anthropic API requires user/assistant alternation.
   // Deduplicate consecutive same-role messages by merging them.
@@ -330,11 +324,11 @@ async function api(messages, system) {
     throw new Error("First message must be from user role.");
   }
 
-  const res = await fetch("/api/anthropic", {
+  const res = await fetch("/api/gemini", {
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "gemini-1.5-flash",
       max_tokens: 2048,
       system,
       messages: cleaned,
@@ -612,7 +606,7 @@ export default function App() {
   const days = tracker.filter(Boolean).length;
 
   // FIX #10: Detect missing API key and warn user early
-  const hasKey = !!import.meta.env.VITE_ANTHROPIC_API_KEY;
+  const hasKey = true; // Gemini key is server-side only
 
   return (
     <>
@@ -670,12 +664,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* FIX #10: Missing API key warning */}
-              {!hasKey && (
-                <div className="sf-warn">
-                  ⚠ No API key detected. Set <code>VITE_ANTHROPIC_API_KEY</code> in your <code>.env</code> file, then restart the dev server.
-                </div>
-              )}
+
 
               <div className="sf-ig">
                 <label className="sf-lbl" htmlFor="sf-jd">Job description</label>
@@ -703,7 +692,7 @@ export default function App() {
               <button
                 className="sf-btn"
                 onClick={start}
-                disabled={!jd.trim() || !resume.trim() || !hasKey}
+                disabled={!jd.trim() || !resume.trim()}
               >
                 Begin diagnostic →
               </button>
